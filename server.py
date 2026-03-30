@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-YT Vault Backend — Cookie Enabled Version
-Fixes YouTube bot verification using cookies.txt
-"""
-
 import os, re, tempfile, threading
 from flask import Flask, request, jsonify, send_file, after_this_request
 from flask_cors import CORS
@@ -15,21 +9,14 @@ CORS(app, expose_headers=["X-Filename"])
 DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 🔥 IMPORTANT: cookies file path
 COOKIE_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 
 
-# ═══════════════════════════════
-# HEALTH CHECK
-# ═══════════════════════════════
 @app.route("/ping")
 def ping():
     return jsonify({"status": "ok"})
 
 
-# ═══════════════════════════════
-# FETCH INFO
-# ═══════════════════════════════
 @app.route("/info", methods=["POST"])
 def get_info():
     data = request.json or {}
@@ -43,36 +30,29 @@ def get_info():
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
-        "cookiefile": COOKIE_FILE,  # ✅ COOKIE ENABLED
+        "cookiefile": COOKIE_FILE,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
 
-            return jsonify({
-                "title": info.get("title"),
-                "channel": info.get("uploader") or info.get("channel"),
-                "thumbnail": info.get("thumbnail"),
-                "duration": info.get("duration"),
-                "view_count": info.get("view_count"),
-                "upload_date": info.get("upload_date"),
-            })
+        return jsonify({
+            "title": info.get("title"),
+            "channel": info.get("uploader"),
+            "thumbnail": info.get("thumbnail"),
+            "duration": info.get("duration"),
+            "view_count": info.get("view_count"),
+        })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ═══════════════════════════════
-# DOWNLOAD
-# ═══════════════════════════════
 @app.route("/download", methods=["POST"])
 def download():
     data = request.json or {}
-    url   = data.get("url", "").strip()
-    mode  = data.get("mode", "video")
-    fmt   = data.get("format", "bestvideo+bestaudio/best")
-    ext   = data.get("ext", "mp4")
+    url = data.get("url", "").strip()
 
     if not url:
         return jsonify({"error": "No URL provided"}), 400
@@ -85,42 +65,17 @@ def download():
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
-        "cookiefile": COOKIE_FILE,  # ✅ COOKIE ENABLED
-        "postprocessors": [],
+        "cookiefile": COOKIE_FILE,
+        "format": "bestvideo+bestaudio/best",
+        "merge_output_format": "mp4",
     }
-
-    # AUDIO MODE
-    if mode == "audio":
-        audio_fmt = data.get("audio_format", "mp3")
-        bitrate   = data.get("audio_bitrate", "320")
-
-        ydl_opts["format"] = "bestaudio/best"
-        ydl_opts["postprocessors"] = [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": audio_fmt,
-            "preferredquality": str(bitrate),
-        }]
-
-    # VIDEO MODE
-    else:
-        ydl_opts["format"] = fmt
-        ydl_opts["merge_output_format"] = ext
-        ydl_opts["postprocessors"] = [{
-            "key": "FFmpegVideoConvertor",
-            "preferedformat": ext
-        }]
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+            ydl.download([url])
 
-        files = [f for f in os.listdir(tmp_dir) if not f.endswith(('.json', '.ytdl'))]
-
-        if not files:
-            return jsonify({"error": "No file generated"}), 500
-
+        files = os.listdir(tmp_dir)
         filepath = os.path.join(tmp_dir, files[0])
-        safe_name = re.sub(r'[^\w\s\-_.]', '', os.path.basename(filepath))[:200]
 
         @after_this_request
         def cleanup(response):
@@ -130,77 +85,11 @@ def download():
             threading.Thread(target=_del).start()
             return response
 
-        return send_file(
-            filepath,
-            as_attachment=True,
-            download_name=safe_name,
-        ), 200, {"X-Filename": safe_name}
+        return send_file(filepath, as_attachment=True)
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# ═══════════════════════════════
-# RUN SERVER
-# ═══════════════════════════════
 if __name__ == "__main__":
-    print("🚀 YT Vault backend running...")
     app.run(host="0.0.0.0", port=5050)
-    mode = data.get("mode", "video")
-    ext = data.get("ext", "mp4")
-
-    if not url:
-        return jsonify({"error": "No URL provided"}), 400
-
-    tmp_dir = tempfile.mkdtemp(dir=DOWNLOAD_DIR)
-    out_template = os.path.join(tmp_dir, "%(title)s.%(ext)s")
-
-    ydl_opts = {
-    "quiet": True,
-    "no_warnings": True,
-    "skip_download": True,
-    "noplaylist": True,
-    "cookiefile": "cookies.txt",  # 🔥 THIS LINE FIXES EVERYTHING
-    }
-
-    if mode == "audio":
-        ydl_opts["format"] = "bestaudio/best"
-        ydl_opts["postprocessors"] = [{
-            "key": "FFmpegExtractAudio",
-            "preferredcodec": "mp3",
-            "preferredquality": "320",
-        }]
-    else:
-        ydl_opts["format"] = "bestvideo+bestaudio/best"
-        ydl_opts["merge_output_format"] = ext
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.extract_info(url, download=True)
-
-        files = os.listdir(tmp_dir)
-        if not files:
-            return jsonify({"error": "Download failed"}), 500
-
-        filepath = os.path.join(tmp_dir, files[0])
-        safe_name = re.sub(r'[^\w\-. ]', '', files[0])
-
-        @after_this_request
-        def cleanup(response):
-            def delete():
-                import shutil
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-            threading.Thread(target=delete).start()
-            return response
-
-        return send_file(filepath, as_attachment=True, download_name=safe_name)
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-# 🚀 Render-compatible run
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    print(f"Starting server on port {port}")
-    app.run(host="0.0.0.0", port=port)
