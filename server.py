@@ -37,6 +37,7 @@ def get_info():
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
+        "cookiefile": "cookies.txt",
     }
 
     try:
