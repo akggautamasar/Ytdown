@@ -84,7 +84,8 @@ def download():
             "no_warnings": True,
             "noplaylist": True,
             "cookiefile": COOKIE_FILE,
-            "format": "bestaudio/best",
+            "format" : "bv*+ba/b"
+ydl_opts["merge_output_format"] = "mp4",
             "postprocessors": [{
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": data.get("audio_format", "mp3"),
