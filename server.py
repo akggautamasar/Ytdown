@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+"""
+YT Vault Backend — Cookie Enabled Version
+Fixes YouTube bot verification using cookies.txt
+"""
 
 import os, re, tempfile, threading
 from flask import Flask, request, jsonify, send_file, after_this_request
@@ -11,19 +15,21 @@ CORS(app, expose_headers=["X-Filename"])
 DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-
-# ✅ Health check
-@app.route("/")
-def home():
-    return "YT Vault Backend running ✅"
+# 🔥 IMPORTANT: cookies file path
+COOKIE_FILE = os.path.join(os.path.dirname(__file__), "cookies.txt")
 
 
+# ═══════════════════════════════
+# HEALTH CHECK
+# ═══════════════════════════════
 @app.route("/ping")
 def ping():
-    return jsonify({"status": "ok", "message": "YT Vault backend running"})
+    return jsonify({"status": "ok"})
 
 
-# 🎯 INFO API
+# ═══════════════════════════════
+# FETCH INFO
+# ═══════════════════════════════
 @app.route("/info", methods=["POST"])
 def get_info():
     data = request.json or {}
@@ -37,7 +43,7 @@ def get_info():
         "no_warnings": True,
         "skip_download": True,
         "noplaylist": True,
-        "cookiefile": "cookies.txt",
+        "cookiefile": COOKIE_FILE,  # ✅ COOKIE ENABLED
     }
 
     try:
@@ -49,20 +55,24 @@ def get_info():
                 "channel": info.get("uploader") or info.get("channel"),
                 "thumbnail": info.get("thumbnail"),
                 "duration": info.get("duration"),
-                "formats": info.get("formats", [])
+                "view_count": info.get("view_count"),
+                "upload_date": info.get("upload_date"),
             })
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
-# 📥 DOWNLOAD API
+# ═══════════════════════════════
+# DOWNLOAD
+# ═══════════════════════════════
 @app.route("/download", methods=["POST"])
 def download():
     data = request.json or {}
-    url = data.get("url", "").strip()
-    mode = data.get("mode", "video")
-    ext = data.get("ext", "mp4")
+    url   = data.get("url", "").strip()
+    mode  = data.get("mode", "video")
+    fmt   = data.get("format", "bestvideo+bestaudio/best")
+    ext   = data.get("ext", "mp4")
 
     if not url:
         return jsonify({"error": "No URL provided"}), 400
@@ -75,6 +85,82 @@ def download():
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        "cookiefile": COOKIE_FILE,  # ✅ COOKIE ENABLED
+        "postprocessors": [],
+    }
+
+    # AUDIO MODE
+    if mode == "audio":
+        audio_fmt = data.get("audio_format", "mp3")
+        bitrate   = data.get("audio_bitrate", "320")
+
+        ydl_opts["format"] = "bestaudio/best"
+        ydl_opts["postprocessors"] = [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": audio_fmt,
+            "preferredquality": str(bitrate),
+        }]
+
+    # VIDEO MODE
+    else:
+        ydl_opts["format"] = fmt
+        ydl_opts["merge_output_format"] = ext
+        ydl_opts["postprocessors"] = [{
+            "key": "FFmpegVideoConvertor",
+            "preferedformat": ext
+        }]
+
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+
+        files = [f for f in os.listdir(tmp_dir) if not f.endswith(('.json', '.ytdl'))]
+
+        if not files:
+            return jsonify({"error": "No file generated"}), 500
+
+        filepath = os.path.join(tmp_dir, files[0])
+        safe_name = re.sub(r'[^\w\s\-_.]', '', os.path.basename(filepath))[:200]
+
+        @after_this_request
+        def cleanup(response):
+            def _del():
+                import shutil
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+            threading.Thread(target=_del).start()
+            return response
+
+        return send_file(
+            filepath,
+            as_attachment=True,
+            download_name=safe_name,
+        ), 200, {"X-Filename": safe_name}
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ═══════════════════════════════
+# RUN SERVER
+# ═══════════════════════════════
+if __name__ == "__main__":
+    print("🚀 YT Vault backend running...")
+    app.run(host="0.0.0.0", port=5050)    url = data.get("url", "").strip()
+    mode = data.get("mode", "video")
+    ext = data.get("ext", "mp4")
+
+    if not url:
+        return jsonify({"error": "No URL provided"}), 400
+
+    tmp_dir = tempfile.mkdtemp(dir=DOWNLOAD_DIR)
+    out_template = os.path.join(tmp_dir, "%(title)s.%(ext)s")
+
+    ydl_opts = {
+    "quiet": True,
+    "no_warnings": True,
+    "skip_download": True,
+    "noplaylist": True,
+    "cookiefile": "cookies.txt",  # 🔥 THIS LINE FIXES EVERYTHING
     }
 
     if mode == "audio":
