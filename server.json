@@ -6,20 +6,17 @@ import { promisify } from 'util';
 const execPromise = promisify(exec);
 const app = express();
 
-app.use(cors({ origin: '*' })); // Allow Vercel frontend
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 3001;
 
-// Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Airdown backend is running 🚀' });
 });
 
-// Get video info + formats (with audio guaranteed)
 app.post('/info', async (req, res) => {
   const { url } = req.body;
-
   if (!url || (!url.includes('youtube.com') && !url.includes('youtu.be'))) {
     return res.status(400).json({ error: 'Please provide a valid YouTube URL' });
   }
@@ -27,21 +24,18 @@ app.post('/info', async (req, res) => {
   try {
     const command = `yt-dlp --dump-json --no-warnings "${url}"`;
     const { stdout } = await execPromise(command, { maxBuffer: 1024 * 1024 * 20 });
-
     const info = JSON.parse(stdout);
 
-    // Filter only formats that have video + audio together (best quality with sound)
     const formats = info.formats
       .filter(f => f.vcodec !== 'none' && f.acodec !== 'none')
       .map(f => ({
         format_id: f.format_id,
-        quality: f.height ? `${f.height}p` : f.format_note,
+        quality: f.height ? `${f.height}p` : f.format_note || 'Unknown',
         ext: f.ext,
         filesize: f.filesize_approx ? Math.round(f.filesize_approx / 1024 / 1024) + ' MB' : 'Unknown',
       }))
-      .sort((a, b) => parseInt(b.quality) - parseInt(a.quality) || 0);
+      .sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
 
-    // Also add best audio only (MP3 option)
     formats.unshift({
       format_id: 'bestaudio',
       quality: 'Audio Only (MP3)',
@@ -53,54 +47,42 @@ app.post('/info', async (req, res) => {
       title: info.title,
       thumbnail: info.thumbnail,
       duration: info.duration_string || 'Unknown',
-      formats: formats.slice(0, 12) // Limit to top 12 options
+      formats: formats.slice(0, 15)
     });
-
   } catch (error) {
     console.error(error);
-    res.status(500).json({ 
-      error: 'Failed to fetch video. YouTube may have changed something. Try again later.' 
-    });
+    res.status(500).json({ error: 'Failed to fetch video info. Try again.' });
   }
 });
 
-// Download route - streams file directly (with audio)
 app.get('/download', (req, res) => {
   const { url, format_id } = req.query;
-
-  if (!url || !format_id) {
-    return res.status(400).send('Missing URL or format');
-  }
+  if (!url || !format_id) return res.status(400).send('Missing parameters');
 
   const safeTitle = 'Airdown_Video';
-  res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.mp4"`);
-  res.setHeader('Content-Type', 'video/mp4');
-
   let command = '';
-  
+  let contentType = 'video/mp4';
+  let filename = `${safeTitle}.mp4`;
+
   if (format_id === 'bestaudio') {
     command = `yt-dlp -x --audio-format mp3 --no-warnings -o - "${url}"`;
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.mp3"`);
+    contentType = 'audio/mpeg';
+    filename = `${safeTitle}.mp3`;
   } else {
-    // Best quality with audio merged
     command = `yt-dlp -f "${format_id}+bestaudio/best" --merge-output-format mp4 --no-warnings -o - "${url}"`;
   }
 
-  const downloadProcess = exec(command, { maxBuffer: 1024 * 1024 * 200 });
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-  downloadProcess.stdout.pipe(res);
+  const proc = exec(command, { maxBuffer: 1024 * 1024 * 300 });
+  proc.stdout.pipe(res);
 
-  downloadProcess.stderr.on('data', (data) => {
-    console.log('Download progress:', data.toString());
-  });
-
-  downloadProcess.on('error', (err) => {
-    console.error(err);
+  proc.on('error', () => {
     if (!res.headersSent) res.status(500).end('Download failed');
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ Airdown Backend running on port ${PORT}`);
+  console.log(`✅ Backend running on port ${PORT}`);
 });
