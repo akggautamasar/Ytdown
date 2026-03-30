@@ -16,7 +16,7 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Airdown backend is running 🚀' });
 });
 
-// Get video info
+// Get video info with improved YouTube extraction
 app.post('/info', async (req, res) => {
   const { url } = req.body;
 
@@ -27,25 +27,26 @@ app.post('/info', async (req, res) => {
   try {
     console.log('🔍 Fetching info for:', url);
 
-    // Improved command with better extractor args to work with current YouTube
+    // Strong extractor args to work better with current YouTube
     const command = `yt-dlp --dump-json --no-warnings \
-      --extractor-args "youtube:player_client=web,android,ios,web_safari" \
-      --user-agent "Mozilla/5.0" "${url}"`;
+      --extractor-args "youtube:player_client=web,android,ios,web_embed,web_safari" \
+      --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+      "${url}"`;
 
     const { stdout, stderr } = await execPromise(command, { 
       maxBuffer: 1024 * 1024 * 50 
     });
 
-    if (stderr) console.log('yt-dlp warning:', stderr);
+    if (stderr) console.log('yt-dlp stderr:', stderr);
 
     const info = JSON.parse(stdout);
 
-    // Filter formats that include both video + audio
+    // Filter only formats with both video and audio
     const formats = info.formats
       .filter(f => f.vcodec !== 'none' && f.acodec !== 'none')
       .map(f => ({
         format_id: f.format_id,
-        quality: f.height ? `${f.height}p` : (f.format_note || f.resolution || 'Unknown'),
+        quality: f.height ? `${f.height}p` : (f.format_note || 'Unknown'),
         ext: f.ext,
         filesize: f.filesize_approx 
           ? Math.round(f.filesize_approx / (1024 * 1024)) + ' MB' 
@@ -53,7 +54,7 @@ app.post('/info', async (req, res) => {
       }))
       .sort((a, b) => (parseInt(b.quality) || 0) - (parseInt(a.quality) || 0));
 
-    // Add MP3 option
+    // Add Audio Only option
     formats.unshift({
       format_id: 'bestaudio',
       quality: 'Audio Only (MP3)',
@@ -70,16 +71,16 @@ app.post('/info', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Backend Error for URL:', url);
-    console.error('Error:', error.message);
+    console.error('Error message:', error.message);
 
-    let errorMsg = 'Failed to fetch video. Try again or use a different public video.';
+    let errorMsg = 'Failed to fetch video. Try a different public video.';
 
-    if (error.message.includes('Video unavailable') || error.message.includes('private video')) {
+    if (error.message.includes('Sign in') || error.message.includes('login') || error.message.includes('age')) {
+      errorMsg = 'This video is age-restricted or requires login. Try a normal public video.';
+    } else if (error.message.includes('private') || error.message.includes('unavailable') || error.message.includes('Video unavailable')) {
       errorMsg = 'This video is private, deleted, or unavailable.';
-    } else if (error.message.includes('Sign in') || error.message.includes('login')) {
-      errorMsg = 'This video requires login (age-restricted or members-only).';
     } else if (error.message.includes('Unable to extract')) {
-      errorMsg = 'YouTube changed something. Backend is trying to update...';
+      errorMsg = 'YouTube changed something. Please try again later.';
     }
 
     res.status(500).json({ error: errorMsg });
@@ -94,11 +95,11 @@ app.get('/download', (req, res) => {
     return res.status(400).send('Missing URL or format_id');
   }
 
-  console.log('📥 Download requested:', format_id, 'for', url);
+  console.log('📥 Download requested for format:', format_id);
 
   let command = '';
   let contentType = 'video/mp4';
-  let filename = `Airdown_${Date.now()}.mp4`;
+  let filename = `Airdown_Video_${Date.now()}.mp4`;
 
   if (format_id === 'bestaudio') {
     command = `yt-dlp -x --audio-format mp3 --no-warnings -o - "${url}"`;
