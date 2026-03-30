@@ -145,7 +145,7 @@ def download():
 # ═══════════════════════════════
 if __name__ == "__main__":
     print("🚀 YT Vault backend running...")
-    app.run(host="0.0.0.0", port=5050)    url = data.get("url", "").strip()
+    app.run(host="0.0.0.0", port=5050)
     mode = data.get("mode", "video")
     ext = data.get("ext", "mp4")
 
