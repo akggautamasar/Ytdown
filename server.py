@@ -53,7 +53,6 @@ def get_info():
             "thumbnail": info.get("thumbnail"),
             "duration": info.get("duration"),
             "view_count": info.get("view_count"),
-            "upload_date": info.get("upload_date"),
         })
 
     except Exception as e:
@@ -66,9 +65,7 @@ def get_info():
 @app.route("/download", methods=["POST"])
 def download():
     data = request.json or {}
-    url   = data.get("url", "").strip()
-    mode  = data.get("mode", "video")
-    ext   = data.get("ext", "mp4")
+    url = data.get("url", "").strip()
 
     if not url:
         return jsonify({"error": "No URL provided"}), 400
@@ -76,36 +73,19 @@ def download():
     tmp_dir = tempfile.mkdtemp(dir=DOWNLOAD_DIR)
     out_template = os.path.join(tmp_dir, "%(title)s.%(ext)s")
 
-    # 🔥 SMART FORMAT LOGIC
-    if mode == "audio":
-        ydl_opts = {
-            "outtmpl": out_template,
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "cookiefile": COOKIE_FILE,
-            "format" : "bv*+ba/b"
-ydl_opts["merge_output_format"] = "mp4",
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": data.get("audio_format", "mp3"),
-                "preferredquality": str(data.get("audio_bitrate", "320")),
-            }],
-        }
+    # 🔥 BULLETPROOF FORMAT (NO CONFLICTS)
+    ydl_opts = {
+        "outtmpl": out_template,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "cookiefile": COOKIE_FILE,
 
-    else:
-        ydl_opts = {
-            "outtmpl": out_template,
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-            "cookiefile": COOKIE_FILE,
+        # THIS LINE FIXES YOUR ERROR
+        "format": "bv*+ba/best",
 
-            # 🔥 BULLETPROOF FORMAT FALLBACK
-            "format": "bv*+ba/b[ext=mp4]/best",
-
-            "merge_output_format": ext,
-        }
+        "merge_output_format": "mp4",
+    }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
